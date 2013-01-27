@@ -148,7 +148,7 @@ module RailsAdmin
     def destroy
       @authorization_adapter.authorize(:destroy, @abstract_model, @object) if @authorization_adapter
 
-      @object = @object.destroy
+      @object.destroy
       flash[:notice] = t("admin.delete.flash_confirmation", :name => @model_config.label)
 
       AbstractHistory.create_history_item("Destroyed #{@model_config.with(:object => @object).object_label}", @object, @abstract_model, _current_user)
@@ -219,66 +219,56 @@ module RailsAdmin
       query = params[:query]
       return {} unless query
       field_search = !!query.index(":")
-      statements = []
-      values = []
-      conditions = options[:conditions] || [""]
-      table_name = @abstract_model.model.table_name
+
+      model      = @abstract_model.model
+      collection = nil
+
       # field search allows a search of the type "<fieldname>:<query>"
       if field_search
         field, query = query.split ":"
         return {} unless field && query
         @properties.select{|property| property[:name] == field.to_sym}.each do |property|
-          statements << "(#{table_name}.#{property[:name]} = ?)"
-          values << query
+          new_collection = model.all(property[:name] => query)
+          collection = (collection ? collection | new_collection : new_collection)
         end
       # search over all string fields
       else
         @properties.select{|property| property[:type] == :string }.each do |property|
-          statements << "(#{table_name}.#{property[:name]} LIKE ?)"
-          values << "%#{query}%"
+          new_collection = model.all(property[:name].like => "%#{query}%")
+          collection = (collection ? collection | new_collection : new_collection)
         end
       end
 
-      conditions[0] += " AND " unless conditions == [""]
-      conditions[0] += statements.join(" OR ")
-      conditions += values
-      conditions != [""] ? {:conditions => conditions} : {}
+      { :conditions => collection.query.conditions }
     end
 
     def get_filter_hash(options)
       filter = params[:filter]
       return {} unless filter
-      statements = []
-      values = []
-      conditions = options[:conditions] || [""]
-      table_name = @abstract_model.model.table_name
+
+      model      = @abstract_model.model
+      collection = nil
 
       filter.each_pair do |key, value|
         if field = @model_config.list.fields.find {|f| f.name == key.to_sym}
-          case field.type
+          new_collection = case field.type
           when :string, :text
-            statements << "(#{table_name}.#{key} LIKE ?)"
-            values << value
+            model.all(field.name.like => value)
           when :boolean
-            statements << "(#{table_name}.#{key} = ?)"
-            values << (value == "true")
+            model.all(field.name => value)
+          else
+            model.all
           end
+          collection = (collection ? collection | new_collection : new_collection)
         end
       end
 
-      conditions[0] += " AND " unless conditions == [""]
-      conditions[0] += statements.join(" AND ")
-      conditions += values
-      conditions != [""] ? {:conditions => conditions} : {}
+      { :conditions => collection.query.conditions }
     end
 
     def get_attributes
       @attributes = params[@abstract_model.to_param.singularize.gsub('~','_')] || {}
       @attributes.each do |key, value|
-        # Deserialize the attribute if attribute is serialized
-        if @abstract_model.model.serialized_attributes.keys.include?(key) and value.is_a? String
-          @attributes[key] = YAML::load(value)
-        end
         # Delete fields that are blank
         @attributes[key] = nil if value.blank?
       end
@@ -336,8 +326,9 @@ module RailsAdmin
       # external filter
       options.merge!(other)
 
-      associations = @model_config.list.visible_fields.select {|f| f.association? && !f.polymorphic? }.map {|f| f.association[:name] }
-      options.merge!(:include => associations) unless associations.empty?
+      # DK: DataMapper does not support eager loading.
+      # associations = @model_config.list.visible_fields.select {|f| f.association? && !f.polymorphic? }.map {|f| f.association[:name] }
+      # options.merge!(:include => associations) unless associations.empty?
 
       if params[:all]
         options.merge!(:limit => per_page * 2)

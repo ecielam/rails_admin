@@ -15,7 +15,7 @@
     end
 
     def attributes=(attributes)
-      object.send :attributes=, attributes, false
+      object.attributes = attributes
     end
 
     def method_missing(name, *args, &block)
@@ -23,7 +23,8 @@
     end
 
     def save(options = { :validate => true })
-      update_all_associations and object.save(options)
+      method = options[:validate] ? :save : :save!
+      update_all_associations and object.send(method)
     end
 
     protected
@@ -54,13 +55,13 @@
 
     def update_associations(association, ids = [])
       associated_model = RailsAdmin::AbstractModel.new(association[:child_model])
-      object.send "#{association[:name]}=", ids.collect{|id| associated_model.get(id)}.compact
+      object.send "#{association[:name]}=", ids.collect{|id| associated_model.model.get(id)}.compact
     end
 
     def update_association(association, id = nil)
       associated_model = RailsAdmin::AbstractModel.new(association[:child_model])
       if associated = associated_model.get(id)
-        associated.update_attributes(association[:child_key].first => object.id)
+        associated.update(association => object)
       end
     end
   end

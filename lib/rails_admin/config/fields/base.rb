@@ -28,7 +28,7 @@ module RailsAdmin
           @defined = false
           @name = name
           @order = 0
-          @properties = properties
+          @properties = properties || {}
 
           # If parent is able to group fields the field should be aware of it
           if parent.kind_of?(RailsAdmin::Config::HasGroups)
@@ -112,9 +112,7 @@ module RailsAdmin
         #
         # @see RailsAdmin::AbstractModel.properties
         register_instance_option(:required?) do
-          validators = abstract_model.model.validators_on(@name)
-          required_by_validator = validators.find{|v| (v.class == ActiveModel::Validations::PresenceValidator) || (v.class == ActiveModel::Validations::NumericalityValidator && v.options[:allow_nil]==false)} && true || false
-          !properties[:nullable?] || required_by_validator
+          !properties[:nullable?]
         end
 
         register_instance_option(:searchable?) do

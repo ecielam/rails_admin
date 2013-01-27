@@ -1,38 +1,43 @@
 module RailsAdmin
-  class History < ActiveRecord::Base
-    set_table_name :rails_admin_histories
+  class History
+    include DataMapper::Resource
+
+    class QueryError < StandardError; end
+
+    storage_names[:default] = 'rails_admin_histories'
 
     IGNORED_ATTRS = Set[:id, :created_at, :created_on, :deleted_at, :updated_at, :updated_on, :deleted_on]
 
-    scope :most_recent, lambda {|table|
-      where("#{retrieve_connection.quote_column_name(:table)} = ?", table).order("updated_at")
-    }
+    property :id,       Serial
+    property :message,  String
+    property :username, String
+    property :item,     Integer
+    property :table,    String
+    property :month,    Integer, :set => 1..12
+    property :year,     Integer, :min => 2010, :max => 2020
+
+    timestamps :at
+
+    # TODO: evaluate performance and add indexes as needed
+
+    def self.most_recent(table)
+      all(:table => table, :order => [ :updated_at ])
+    end
 
     def self.get_history_for_dates(mstart, mstop, ystart, ystop)
-      sql_in = ""
-      if mstart > mstop
-        sql_in_end = (1..mstop).to_a.join(", ")
-
-        results = History.find_by_sql("select count(*) as record_count, year, month from rails_admin_histories where month IN (#{sql_in_end}) and year = #{ystop} group by year, month")
-
-        if mstart < 12
-          sql_in_start = (mstart + 1..12).to_a.join(", ")
-          results_start = History.find_by_sql("select count(*) as record_count, year, month from rails_admin_histories where month IN (#{sql_in_start}) and year = #{ystart} group by year, month")
-          results = results_start.concat(results)
-        end
-
-        results
+      rows = if mstart > mstop
+        aggregate(:all.count, :fields => [ :year, :month ], :month => mstart + 1..12, :year => ystart) |
+        aggregate(:all.count, :fields => [ :year, :month ], :month => 1..mstop,       :year => ystop)
       else
-        sql_in =  (mstart + 1..mstop).to_a.join(", ")
-
-        results = History.find_by_sql("select count(*) as record_count, year, month from rails_admin_histories where month IN (#{sql_in}) and year = #{ystart} group by year, month")
+        aggregate(:all.count, :fields => [ :year, :month ], :month => mstart + 1..mstop, :year => ystart)
       end
 
-      results.each do |result|
-        result.record_count = result.record_count.to_i
-      end
+      result_class = Struct.new(:year, :month, :number)
+      results      = rows.map { |row| result_class.new(*row) }
 
       add_blank_results(results, mstart, ystart)
+    rescue => e
+      raise QueryError, e.message, e.backtrace
     end
 
     def self.add_blank_results(results, mstart, ystart)
